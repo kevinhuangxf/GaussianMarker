@@ -1,8 +1,5 @@
 # Image Watermarking with Revisited HiDDeN
 
-[`Colab demo`](https://colab.research.google.com/github/facebookresearch/stable_signature/blob/master/hidden/notebooks/demo.ipynb)
-(for using the pre-trained networks for traditional image watermarking.)
-
 This repository is heavily based on the paper [HiDDeN: Hiding Data With Deep Networks](https://arxiv.org/abs/1807.09937).
 The main differences are:
 - there is no adversarial network, nor any image loss,
@@ -10,21 +7,7 @@ The main differences are:
 
 Another implementation is available at [ando-khachatryan/HiDDeN](https://github.com/ando-khachatryan/HiDDeN).
 
-
 ## Setup
-
-### Requirements
-
-This codebase has been developed with python version 3.8, PyTorch version 1.12.0, CUDA 11.3.
-[PyTorch](https://pytorch.org/) can be installed with:
-```cmd
-conda install -c pytorch torchvision pytorch==1.12.0 cudatoolkit=11.3
-```
-
-To install the remaining dependencies with pip, run:
-```cmd
-pip install -r requirements.txt
-```
 
 ### Data
 
@@ -173,18 +156,3 @@ The logs during training are:
 The resulting checkpoints have approximately the same performance as in the paper:
 [`hidden_replicate.pth`](https://dl.fbaipublicfiles.com/ssl_watermarking/hidden_replicate.pth) - [`hidden_replicate_whit.torchscript.pth`](https://dl.fbaipublicfiles.com/ssl_watermarking/hidden_replicate_whit.torchscript.pt).
 (Robustness to JPEG is a bit worse, because the augmentation implementation differ a bit from the paper: this could be fixed by increasing the JPEG augmentation probability).
-
-
-
-## Citation
-
-If you find this repository useful, please consider giving a star :star: and please cite as:
-
-```
-@article{fernandez2023stable,
-  title={The Stable Signature: Rooting Watermarks in Latent Diffusion Models},
-  author={Fernandez, Pierre and Couairon, Guillaume and J{\'e}gou, Herv{\'e} and Douze, Matthijs and Furon, Teddy},
-  journal={arXiv preprint arXiv:2303.15435},
-  year={2023}
-}
-```

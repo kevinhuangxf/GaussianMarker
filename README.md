@@ -33,23 +33,35 @@ Please download the [Blender](https://github.com/bmild/nerf), [LLFF](https://git
 
 ## Training
 
-You can train your 3DGS model using this repo, or use the official [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) repo:
+### Stage 1
+
+You can train your 3DGS model using this repo, or use the official [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting):
 
 ```
 python train.py -s /path/to/dataset
 ```
 
+We provide the pretrained HiDDeN model in the [hidden](hidden) folder based on the [Stable Signature](https://github.com/facebookresearch/stable_signature). You can run the pretrained HiDDeN model by:
+
+```
+PYTHONPATH=. python hidden/hidden_images.py hidden/imgs/ hidden/results
+```
+
+You can check the [README.md](hidden/README.md) file for how to train the HiDDeN model from scratch.
+
+### Stage 2
+
 Train and evaluate the GaussianMarker on the 3DGS models:
 
 ```
 # Train on Blender
-python train_gaussianmarker.py -s /path/to/nerf_synthetic/ship -m path/to/3dgs_model --results_name ship
+python train_gaussianmarker.py -s /path/to/nerf_synthetic/ship -m path/to/3dgs_model --iterations 2000
 
-# Train on LLFF
-python train_gaussianmarker.py -s /path/to/nerf_llff_colmap/trex -m path/to/3dgs_model --results_name trex
+# Train on LLFF and save visualization results
+python train_gaussianmarker.py -s /path/to/nerf_llff_colmap/trex -m path/to/3dgs_model --iterations 1000 --save_vis
 
-# Train on MipNeRF360
-python train_gaussianmarker.py -s /path/to/mip360/bicycle -m path/to/3dgs_model --results_name bicycle -r 4
+# Train on MipNeRF360 with 1/4 resolotion for saving memory and save visualization results
+python train_gaussianmarker.py -s /path/to/mip360/bicycle -m path/to/3dgs_model --iterations 2000 --save_vis -r 4
 ```
 
 ## Ciatation

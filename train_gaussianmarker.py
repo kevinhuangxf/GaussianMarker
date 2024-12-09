@@ -109,41 +109,6 @@ def densify_gs_by_mask(gaussians, H_mask):
 
     return gaussians, gaussians_origin_densified
 
-def visualization_uncertainty_map(H_train, scene, gaussians, pipe, background):
-    viewpoint_cams = scene.getTrainCameras().copy()
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-    torch.cuda.empty_cache()
-    hessian_color = repeat(H_train.detach(), "n -> n c", c=3)
-    for cam in tqdm(viewpoint_cams, desc="Saving uncertainty map on training views"):
-        try:
-            cur_hessian_color = hessian_color.cuda()
-            # cur_hessian_color = torch.log(torch.abs(cur_hessian_color) + 1e-5)
-            # cur_hessian_color = (cur_hessian_color - cur_hessian_color.min()) / (cur_hessian_color.max() - cur_hessian_color.min())
-
-            render_pkg = render(cam, gaussians, pipe, background, override_color=cur_hessian_color)
-            uncertanity_map = reduce(render_pkg["render"], "c h w -> h w", "mean")
-            # sns.heatmap(torch.log(uncertanity_map / pixel_gaussian_counter).detach().cpu(), square=True)
-            uncertanity_map = torch.log(torch.abs(uncertanity_map) + 1e-5)
-            uncertanity_map = (uncertanity_map - uncertanity_map.min()) / (uncertanity_map.max() - uncertanity_map.min())
-            # sns.heatmap(torch.log(torch.abs(uncertanity_map) + 1e-5).detach().cpu(), square=True)
-            sns.heatmap(uncertanity_map.detach().cpu(), square=True)
-            plt.savefig(f'/workspace/code/gaussian-splatting_wm/visualizations/trex/uncertainty_map_{cam.image_name}.png')
-            plt.clf()
-        except Exception as e:
-            # Handle the exception
-            print(f"An error occurred: {e}")
-
-def visualization_plot(H_train):
-    sorted_H_train, sorted_H_train_index = torch.sort(torch.log(torch.abs(H_train)), descending=True)
-
-    # # Plot the sorted H_train
-    plt.plot(sorted_H_train)
-    plt.xlabel('Parameter Index')
-    plt.ylabel('Hessian Value')
-    plt.title('Descending Order of Hessian Values')
-    plt.savefig('grad.png')
-    plt.close()
-
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, args):
     first_iter = 0
     gaussians = GaussianModel(dataset.sh_degree)
@@ -253,15 +218,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 with torch.no_grad():
                     image_origin = render(viewpoint_cam, gaussians_origin, pipe, bg)["render"]
 
-                # Define the directory name
-                dir_name = f"results_{args.results_name}"
-                # Check if the directory exists
-                if not os.path.exists(dir_name):
-                    # If not, create it
-                    os.makedirs(dir_name)
+                # # Define the directory name
+                # dir_name = os.path.join(scene.model_path, f"results_gaussianmarker")
+                # # Check if the directory exists
+                # if not os.path.exists(dir_name):
+                #     # If not, create it
+                #     os.makedirs(dir_name)
 
-                if args.save_vis:
-                    torchvision.utils.save_image(torch.cat((image_origin, image, (image-image_origin) * 10), dim=2), os.path.join(dir_name, '{0:05d}'.format(iteration) + ".png"))
+                # if args.save_vis:
+                #     torchvision.utils.save_image(torch.cat((image_origin, image, (image-image_origin) * 10), dim=2), os.path.join(dir_name, '{0:05d}'.format(iteration) + ".png"))
 
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -296,8 +261,7 @@ def training_report(iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, 
         validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
 
-        # dir_name = 'results_trex_wm_test'
-        dir_name = f"results_{args.results_name}_hessian_test"
+        dir_name = os.path.join(scene.model_path, f"results_gaussianmarker")
         if not os.path.exists(dir_name):
             os.mkdir(dir_name)
 
@@ -319,9 +283,11 @@ def training_report(iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, 
                     
                     # save test images
                     gt_name = os.path.join(dir_name, f"gt_{idx}.png")
-                    if not os.path.exists(gt_name):
-                        torchvision.utils.save_image(gt_image, gt_name)
-                    torchvision.utils.save_image(torch.cat((image, (image-gt_image)*10), dim=1), os.path.join(dir_name, f"{iteration:05d}_{idx}.png" ))
+                    # if not os.path.exists(gt_name):
+                    #     torchvision.utils.save_image(gt_image, gt_name)
+                    if args.save_vis:
+                        torchvision.utils.save_image(torch.cat((image, (image-gt_image)*10), dim=1), 
+                                                     os.path.join(dir_name, f"{iteration:05d}_{idx}.png"))
 
                     # test hidden
                     # test hidden with tensor image
@@ -392,7 +358,6 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("--results_name", type=str, default = "hidden")
     parser.add_argument("--H_threshold_factor", type=int, default=0.002)
     parser.add_argument("--input_msg", type=str, default="111010110101000001010111010011010100010000100111")
     parser.add_argument("--save_vis", action='store_true', default=False)
