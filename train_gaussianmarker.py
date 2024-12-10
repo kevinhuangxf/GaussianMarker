@@ -34,7 +34,12 @@ from utils.aug_utils import addNoise, Resize, compute_snr
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+import copy
 from torchvision.transforms.v2 import JPEG
+from models.pointnet_cls import get_model, get_loss
+from models.pointnet_utils import feature_transform_reguliarzer, compute_snr, noise, rotate, translate, crop_out, noise_to_gaussians_color
+from utils.system_utils import searchForMaxIteration
+from collections import Counter
 
 def create_message(input_msg, random_msg=False):
     # create message
@@ -343,6 +348,186 @@ def training_report(iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, 
 
         torch.cuda.empty_cache()
 
+def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
+    
+    binary_message = create_message(args.input_msg)
+    # binary_message = torch.randint(0, 2, (1, code_length)).float().cuda()
+    code_length = binary_message.shape[1]
+    zero_message = torch.zeros((1, code_length)).float().cuda()
+    one_message = torch.ones((1, code_length)).float().cuda()
+
+    pointnet_loss = get_loss()
+    pointnet_adv = get_model(1, normal_channel=False, channel_num=14).cuda()
+    pointnet_msg = get_model(code_length, normal_channel=False, channel_num=14).cuda()
+    optimizer = torch.optim.Adam(
+        # pointnet.parameters(),
+        list(pointnet_adv.parameters()) + list(pointnet_msg.parameters()),
+        lr=1e-5,
+        betas=(0.9, 0.999),
+        eps=1e-08,
+        weight_decay=1e-4
+    )
+
+    gaussianmarker_model_path = os.path.join(args.model_path, "point_cloud_uncertainty_wm")
+    loaded_iter = searchForMaxIteration(gaussianmarker_model_path)
+
+    gaussians_origin = GaussianModel(dataset.sh_degree)
+    gaussians_origin_path = os.path.join(gaussianmarker_model_path,
+                                        "iteration_" + str(loaded_iter),
+                                        "point_cloud_densified.ply") # "point_cloud_origin.ply"
+    gaussians_origin.load_ply(gaussians_origin_path)
+
+    gaussians = GaussianModel(dataset.sh_degree)
+    gaussians_wm_path = os.path.join(gaussianmarker_model_path,
+                                        "iteration_" + str(loaded_iter),
+                                        "point_cloud_wm.ply") # "point_cloud_origin.ply"
+    gaussians.load_ply(gaussians_wm_path)
+
+    first_iter = 0
+    iter_start = torch.cuda.Event(enable_timing = True)
+    iter_end = torch.cuda.Event(enable_timing = True)
+
+    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
+    first_iter += 1
+
+    # augmentation
+    aug_list = [noise_to_gaussians_color]
+    # aug_list = [noise, rotate, translate, crop_out]
+
+    random_index = random.choice(range(len(aug_list)))
+    gaussians_aug = aug_list[random_index](gaussians)
+
+    xyz = torch.cat((gaussians_aug.get_xyz, gaussians_aug._features_dc.squeeze(1), gaussians_aug.get_opacity, gaussians_aug.get_scaling, gaussians_aug.get_rotation), dim=1)
+    xyz_origin = torch.cat((gaussians_origin.get_xyz, gaussians_origin._features_dc.squeeze(1), gaussians_origin.get_opacity, gaussians_origin.get_scaling, gaussians_origin.get_rotation), dim=1)
+
+    mean = 0
+    std_dev = 1.0
+    # noise_np = np.random.normal(mean, std_dev, xyz.shape//10)
+    noise_np = np.random.normal(mean, std_dev, (xyz.shape[0]//10, 1))
+    # Convert the NumPy array to a PyTorch tensor
+    noise_torch = torch.tensor(noise_np, dtype=torch.float32).cuda()
+
+    feat_noise = torch.zeros((noise_torch.shape[0], 13)).cuda()
+    xyz_noise = torch.cat((noise_torch, feat_noise), dim=1)
+    xyz = torch.cat((xyz, xyz_noise), dim=0)
+
+    for iteration in range(first_iter, opt.iterations + 1):        
+
+        iter_start.record()
+
+        # random select points
+        N = args.num_points
+        xyz = xyz[torch.randperm(xyz.shape[0])[:N]]
+        xyz2 = xyz_origin[torch.randperm(xyz_origin.shape[0])[:N]]
+        xyz_origin = xyz_origin[torch.randperm(xyz_origin.shape[0])[:N]]
+        
+        # point-net
+        xyz_ = torch.cat((xyz.unsqueeze(0), xyz_origin.unsqueeze(0)), dim=0).permute(0, 2, 1)
+        xyz2_ = torch.cat((xyz2.unsqueeze(0), xyz_origin.unsqueeze(0)), dim=0).permute(0, 2, 1)
+        pred, feat = pointnet_adv(xyz_)
+        pred_, feat_ = pointnet_adv(xyz2_)
+        pred2, feat2 = pointnet_msg(xyz_)
+        # adv losses
+        bce_loss = F.binary_cross_entropy(pred, torch.cat((torch.ones((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0))
+        bce_loss_ = F.binary_cross_entropy(pred_, torch.cat((torch.zeros((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0))
+        
+        # msg losses
+        mean_pred2 = torch.mean(pred2, dim=0).unsqueeze(0)
+
+        bce_loss2 = F.binary_cross_entropy(mean_pred2, binary_message)
+
+        # feature regularization
+        mat_diff_loss_scale = 0.001
+        mat_diff_loss = feature_transform_reguliarzer(feat)
+        mat_diff_loss2 = feature_transform_reguliarzer(feat2)
+
+        loss = 1.0 * (bce_loss +  bce_loss_) + bce_loss2 + mat_diff_loss_scale * (mat_diff_loss  + mat_diff_loss2)
+
+        loss.backward(retain_graph=True)
+
+        iter_end.record()
+
+        with torch.no_grad():
+            # Progress bar
+            if iteration % 10 == 0:
+                # progress_bar.set_postfix({"pred": f"{(int(pred[0] > 0.5), int(pred[1] > 0.5))}"})
+                # progress_bar.set_postfix({"binary_message": f"{binary_message}", "pred": f"{pred}"})
+                adv_pred = (pred >= 0.5).float()
+                adv_acc = torch.sum(adv_pred == torch.cat((torch.ones((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0)) / adv_pred.shape[0] / adv_pred.shape[1]
+                adv_pred_ = (pred_ >= 0.5).float()
+                adv_acc_ = torch.sum(adv_pred_ == torch.cat((torch.zeros((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0)) / adv_pred_.shape[0] / adv_pred_.shape[1]
+                msg_pred = (pred2 >= 0.5).float()
+                msg_acc = torch.sum(msg_pred == torch.cat((binary_message, binary_message), dim=0)) / msg_pred.shape[0] / msg_pred.shape[1]
+                progress_bar.set_postfix({"loss": f"{loss}", "adv_acc": f"{adv_acc}", "adv_acc_": f"{adv_acc_}", "msg_acc": f"{msg_acc}"})
+                progress_bar.update(10)
+
+            if iteration == opt.iterations:
+                progress_bar.close()
+
+            if iteration in testing_iterations:
+                torch.cuda.empty_cache()
+
+                def eval_aug(aug_index):
+                    if aug_index == 4:
+                        gaussians_aug = aug_list[aug_index](gaussians, 0.3)
+                    else:
+                        gaussians_aug = aug_list[aug_index](gaussians)
+
+                    # point-net
+                    xyz = torch.cat((gaussians_aug.get_xyz, gaussians_aug._features_dc.squeeze(1), gaussians_aug.get_opacity, gaussians_aug.get_scaling, gaussians_aug.get_rotation), dim=1)
+                    xyz_origin = torch.cat((gaussians_origin.get_xyz, gaussians_origin._features_dc.squeeze(1), gaussians_origin.get_opacity, gaussians_origin.get_scaling, gaussians_origin.get_rotation), dim=1)
+                            
+                    # Select the corresponding points from xyz tensor
+                    N = args.num_points
+                    xyz = xyz[torch.randperm(xyz.shape[0])[:N]]
+                    xyz2 = xyz_origin[torch.randperm(xyz.shape[0])[:N]]
+                    xyz_origin = xyz_origin[torch.randperm(xyz_origin.shape[0])[:N]]
+
+                    xyz_ = torch.cat((xyz.unsqueeze(0), xyz_origin.unsqueeze(0)), dim=0).permute(0, 2, 1)
+                    xyz2_ = torch.cat((xyz_origin.unsqueeze(0), xyz2.unsqueeze(0)), dim=0).permute(0, 2, 1)
+                    pred, feat = pointnet_adv(xyz_)
+                    pred2, feat2 = pointnet_msg(xyz2_)
+                    pred_, feat_ = pointnet_adv(xyz2_)
+                    adv_pred = (pred >= 0.5).float()
+                    adv_acc = torch.sum(adv_pred == torch.cat((torch.ones((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0)) / adv_pred.shape[0] / adv_pred.shape[1]
+                    msg_pred = (pred2 >= 0.5).float()
+                    msg_acc = torch.sum(msg_pred == torch.cat((binary_message, binary_message), dim=0)) / msg_pred.shape[0] / msg_pred.shape[1]
+                    adv_pred_ = (pred_ >= 0.5).float()
+                    adv_acc_ = torch.sum(adv_pred_ == torch.cat((torch.zeros((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0)) / adv_pred_.shape[0] / adv_pred_.shape[1]
+                    print(f"Test iteration {iteration}: adv_acc: {adv_acc} adv_acc_: {adv_acc_} msg_acc: {msg_acc}")
+
+                    return adv_acc, adv_acc_
+
+                for aug_index in range(len(aug_list)):
+                    print(aug_list[aug_index])
+                    adv_pred_result = torch.zeros((2, 1)).float().cuda() # torch.cat((torch.ones((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0) # torch.ones((2, 1)).float().cuda()
+                    adv_pred__result = torch.zeros((2, 1)).float().cuda()
+
+                    # majority voting
+                    adv_acc_results = []
+                    adv_acc__results = []
+                    for i in range(11):
+                        adv_acc, adv_acc_ = eval_aug(aug_index)
+                        adv_acc_results.append(adv_acc)
+                        adv_acc__results.append(adv_acc_)
+
+                    counter = Counter(adv_acc_results)
+                    most_common_item, count = counter.most_common(1)[0]
+                    adv_acc = most_common_item
+
+                    counter = Counter(adv_acc__results)
+                    most_common_item, count = counter.most_common(1)[0]
+                    adv_acc_ = most_common_item
+
+                    print(f"Test iteration {iteration} results: adv_acc: {adv_acc} adv_acc_: {adv_acc_}")
+
+                torch.cuda.empty_cache()
+
+            # Optimizer step
+            if iteration < opt.iterations:
+                optimizer.step()
+                optimizer.zero_grad()
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -362,6 +547,8 @@ if __name__ == "__main__":
     parser.add_argument("--input_msg", type=str, default="111010110101000001010111010011010100010000100111")
     parser.add_argument("--save_vis", action='store_true', default=False)
     parser.add_argument("--uncertainty_use_modified_render", action='store_true', default=False)
+    parser.add_argument("--train_3d_decoder", action='store_true', default=False)
+    parser.add_argument("--num_points", type=int, default=10000)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -372,7 +559,11 @@ if __name__ == "__main__":
 
     # Configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args)
+    if args.train_3d_decoder:
+        # dataset, opt, pipe, testing_iterations, args
+        training_3d_decoder(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args)
+    else:
+        training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args)
 
     # All done
     print("\nTraining complete.")
