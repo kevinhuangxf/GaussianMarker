@@ -55,13 +55,19 @@ Train and evaluate the GaussianMarker on the 3DGS models:
 
 ```
 # Train on Blender
-python train_gaussianmarker.py -s /path/to/nerf_synthetic/ship -m path/to/3dgs_model --iterations 2000
+python train_gaussianmarker.py -s /path/to/nerf_synthetic/lego -m path/to/3dgs_model --iterations 2000
 
 # Train on LLFF and save visualization results
 python train_gaussianmarker.py -s /path/to/nerf_llff_colmap/trex -m path/to/3dgs_model --iterations 1000 --test_iterations 1000 --save_iterations 1000 --save_vis
 
 # Train on MipNeRF360 with 1/4 resolotion for saving memory and save visualization results
 python train_gaussianmarker.py -s /path/to/mip360/bicycle -m path/to/3dgs_model --iterations 2000 --save_vis -r 4
+```
+
+Train 3D decoder (optional):
+
+```
+python train_gaussianmarker.py -m /path/to/nerf_synthetic/lego --train_3d_decoder --iterations 2000 --test_iterations 2000
 ```
 
 ## Ciatation
