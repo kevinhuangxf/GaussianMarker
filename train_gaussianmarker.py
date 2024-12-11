@@ -51,7 +51,7 @@ def create_message(input_msg, random_msg=False):
     # msg = 2 * msg_ori.type(torch.float) - 1 # b k
     return msg_ori
 
-def uncertainty_estimation(gaussians, scene, pipe, background, uncertainty_use_modified_render=False):
+def uncertainty_estimation(gaussians, scene, pipe, background, uncertainty_use_gs_render=False):
 
     # uncertainty
     filter_out_grad = ["rotation", "opacity", "scale"]
@@ -75,7 +75,7 @@ def uncertainty_estimation(gaussians, scene, pipe, background, uncertainty_use_m
         # if exit_func():
         #     raise RuntimeError("csm should exit early")
 
-        if uncertainty_use_modified_render:
+        if not uncertainty_use_gs_render:
             render_pkg = modified_render(cam, gaussians, pipe, background)
             pred_img = render_pkg["render"]
             pred_img.backward(gradient=torch.ones_like(pred_img))
@@ -145,7 +145,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     aug_dict = {"gaussian_noise": gaussian_noise, "resize": resize, "jpeg": jpeg, "gaussian_blur": gaussian_blur}
 
     # uncertainty
-    H_train = uncertainty_estimation(gaussians, scene, pipe, background, args.uncertainty_use_modified_render)
+    H_train = uncertainty_estimation(gaussians, scene, pipe, background, args.uncertainty_use_gs_render)
     H_threshold = torch.abs(H_train).mean() * args.H_threshold_factor # for low uncertainty
     H_mask = torch.abs(H_train) < H_threshold # torch.abs(H_train).mean() // 500 # for high uncertainty
 
@@ -551,7 +551,7 @@ if __name__ == "__main__":
     parser.add_argument("--H_threshold_factor", type=int, default=0.002)
     parser.add_argument("--input_msg", type=str, default="111010110101000001010111010011010100010000100111")
     parser.add_argument("--save_vis", action='store_true', default=False)
-    parser.add_argument("--uncertainty_use_modified_render", action='store_true', default=False)
+    parser.add_argument("--uncertainty_use_gs_render", action='store_true', default=False)
     parser.add_argument("--train_3d_decoder", action='store_true', default=False)
     parser.add_argument("--num_points", type=int, default=10000)
     args = parser.parse_args(sys.argv[1:])
