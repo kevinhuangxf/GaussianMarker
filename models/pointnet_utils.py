@@ -238,4 +238,5 @@ def crop_out(gaussians, crop_ratio=0.1):
     gaussians_aug._opacity = torch.cat((gaussians.get_opacity[:start_idx], gaussians.get_opacity[end_idx:]), dim=0)
     gaussians_aug._scaling = torch.cat((gaussians.get_scaling[:start_idx], gaussians.get_scaling[end_idx:]), dim=0)
     gaussians_aug._rotation = torch.cat((gaussians.get_rotation[:start_idx], gaussians.get_rotation[end_idx:]), dim=0)
+    gaussians_aug._features_dc = torch.cat((gaussians._features_dc[:start_idx], gaussians._features_dc[end_idx:]), dim=0)
     return gaussians_aug

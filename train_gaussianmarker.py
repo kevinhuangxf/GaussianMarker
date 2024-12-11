@@ -139,7 +139,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     # augmentation
     gaussian_noise = addNoise(0.1)
-    resize = transforms.RandomResizedCrop(size=(image_height, image_width), scale=(0.75, 1.0), ratio=(image_ratio, image_ratio))
+    resize = transforms.RandomResizedCrop(size=(image_height, image_width), scale=(0.9, 1.0), ratio=(image_ratio, image_ratio))
     jpeg = JPEG((50, 100))
     gaussian_blur = transforms.GaussianBlur(kernel_size=3, sigma=0.1)
     aug_dict = {"gaussian_noise": gaussian_noise, "resize": resize, "jpeg": jpeg, "gaussian_blur": gaussian_blur}
@@ -182,7 +182,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # add augmentation
         random_value = random.random()
-        if random_value < 0.5:
+        if random_value < 0.25:
             image = resize(image)
         
         # Loss
@@ -392,7 +392,6 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
 
     # augmentation
     aug_list = [noise_to_gaussians_color]
-    # aug_list = [noise, rotate, translate, crop_out]
 
     random_index = random.choice(range(len(aug_list)))
     gaussians_aug = aug_list[random_index](gaussians)
@@ -427,6 +426,12 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
         pred, feat = pointnet_adv(xyz_)
         pred_, feat_ = pointnet_adv(xyz2_)
         pred2, feat2 = pointnet_msg(xyz_)
+        if iteration % 10 == 0:
+            aug_list = [noise, rotate, translate, crop_out]
+            random_index = random.choice(range(len(aug_list)))
+            gaussians_aug = aug_list[random_index](gaussians)
+            xyz = torch.cat((gaussians_aug.get_xyz, gaussians_aug._features_dc.squeeze(1), gaussians_aug.get_opacity, gaussians_aug.get_scaling, gaussians_aug.get_rotation), dim=1)
+
         # adv losses
         bce_loss = F.binary_cross_entropy(pred, torch.cat((torch.ones((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0))
         bce_loss_ = F.binary_cross_entropy(pred_, torch.cat((torch.zeros((1, 1)).float().cuda(), torch.zeros((1, 1)).float().cuda()), dim=0))
@@ -519,7 +524,7 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
                     most_common_item, count = counter.most_common(1)[0]
                     adv_acc_ = most_common_item
 
-                    print(f"Test iteration {iteration} results: adv_acc: {adv_acc} adv_acc_: {adv_acc_}")
+                    print(f"Test iteration {iteration} results: adv_acc: {adv_acc} adv_acc_: {adv_acc_} msg_acc: {msg_acc}")
 
                 torch.cuda.empty_cache()
 
