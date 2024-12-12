@@ -15,6 +15,10 @@ git clone https://kevinhuangxf.github.io/GaussianMarker/ --recursive
 ## Installation
 
 ```
+# create conda environment
+conda create -n gaussianmarker python=3.8
+conda activate gaussianmarker
+
 # install pytorch
 pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 
