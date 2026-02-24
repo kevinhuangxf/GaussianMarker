@@ -362,11 +362,12 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
     optimizer = torch.optim.Adam(
         # pointnet.parameters(),
         list(pointnet_adv.parameters()) + list(pointnet_msg.parameters()),
-        lr=1e-5,
+        lr=1e-4, # from 1e-5 to 1e-4
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=1e-4
     )
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.999) # Added exponential scheduler
 
     gaussianmarker_model_path = os.path.join(args.model_path, "point_cloud_uncertainty_wm")
     loaded_iter = searchForMaxIteration(gaussianmarker_model_path)
@@ -446,7 +447,10 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
         mat_diff_loss = feature_transform_reguliarzer(feat)
         mat_diff_loss2 = feature_transform_reguliarzer(feat2)
 
-        loss = 1.0 * (bce_loss +  bce_loss_) + bce_loss2 + mat_diff_loss_scale * (mat_diff_loss  + mat_diff_loss2)
+        lambda1_prime = 2.0
+
+        # 1.0 * adv_loss + 2.0 * msg_loss
+        loss = 1.0 * (bce_loss +  bce_loss_) + lambda1_prime * bce_loss2 + mat_diff_loss_scale * (mat_diff_loss  + mat_diff_loss2)
 
         loss.backward(retain_graph=True)
 
@@ -531,6 +535,7 @@ def training_3d_decoder(dataset, opt, pipe, testing_iterations, args):
             # Optimizer step
             if iteration < opt.iterations:
                 optimizer.step()
+                scheduler.step() # Exponential Scheduler
                 optimizer.zero_grad()
 
 if __name__ == "__main__":
